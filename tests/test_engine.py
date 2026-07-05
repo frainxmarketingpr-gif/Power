@@ -1,5 +1,6 @@
 """Pruebas unitarias (pytest) del motor estadistico."""
 import itertools
+import os
 from math import comb
 
 import numpy as np
@@ -8,6 +9,11 @@ import pytest
 import powerball_simulator as base
 import powerball_advanced as adv
 from pb_engine.config import ScoreWeights, Rules, Settings
+
+# Datos oficiales incluidos en la raiz del repo (rutas relativas, portables)
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DATA_2016 = os.path.join(_ROOT, "powerball_results_20160601_to_20260601.xlsx")
+DATA_2010 = os.path.join(_ROOT, "powerball_resultados.xlsx")
 
 
 # --------------------------- Combinatoria / reglas ---------------------------
@@ -71,9 +77,7 @@ def test_numba_mc_sum_density_shape_and_peak():
 # --------------------------- Determinismo del score --------------------------
 @pytest.fixture(scope="module")
 def model():
-    p2016 = "/root/.claude/uploads/a4b780aa-d8bd-585a-acd0-c3b7c62fa30c/5fc9dfb0-powerball_results_20160601_to_20260601.xlsx"
-    p2010 = "/root/.claude/uploads/a4b780aa-d8bd-585a-acd0-c3b7c62fa30c/81ca6cba-powerball_resultados.xlsx"
-    raw = base.load_raw(p2016, p2010)
+    raw = base.load_raw(DATA_2016, DATA_2010)
     clean, _ = base.clean_and_validate(raw)
     cur = base.current_era(clean)
     a = base.analyze(cur)
@@ -161,10 +165,7 @@ def test_ga_elitism_returns_global_best(model):
 def history():
     from pb_engine import data_io
     from pb_engine.config import Rules as R
-    df, _ = data_io.load(
-        "/root/.claude/uploads/a4b780aa-d8bd-585a-acd0-c3b7c62fa30c/5fc9dfb0-powerball_results_20160601_to_20260601.xlsx",
-        "/root/.claude/uploads/a4b780aa-d8bd-585a-acd0-c3b7c62fa30c/81ca6cba-powerball_resultados.xlsx",
-        R())
+    df, _ = data_io.load(DATA_2016, DATA_2010, R())
     return df
 
 
