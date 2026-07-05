@@ -1,11 +1,19 @@
-"""Interfaz visual con Streamlit.  Ejecutar:  streamlit run pb_engine/app.py"""
+"""Interfaz visual con Streamlit.  Ejecutar:  streamlit run pb_engine/app.py
+
+Streamlit ejecuta este archivo como script suelto (no como paquete), por eso
+se anade la raiz del repo a sys.path y se usan imports absolutos: asi funciona
+tanto en local como en Replit."""
 from __future__ import annotations
+
+import os
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import streamlit as st
 import plotly.graph_objects as go
 
-from .config import Settings
-from . import pipeline
+from pb_engine.config import Settings
+from pb_engine import pipeline
 
 st.set_page_config(page_title="Powerball — Simulador estadistico", layout="wide")
 
@@ -21,12 +29,6 @@ with st.sidebar:
     mc = st.select_slider("Iteraciones Monte Carlo",
                           [1_000_000, 5_000_000, 10_000_000], value=1_000_000)
     run_btn = st.button("Ejecutar simulacion", type="primary")
-
-
-@st.cache_data(show_spinner=True)
-def _run(n, mc_iters):
-    return pipeline.run(Settings(n_plays=n, mc_iters=mc_iters)).plays, \
-        pipeline.run(Settings(n_plays=n, mc_iters=mc_iters))
 
 
 if run_btn:

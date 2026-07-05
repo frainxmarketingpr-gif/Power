@@ -1,0 +1,21 @@
+# Requisitos LIGEROS para Replit free tier (RAM/almacenamiento limitados).
+# Omite PyMC (que compila en C y pesa mucho). El pipeline lo detecta y degrada
+# con elegancia: reporta "PyMC no disponible" y sigue con el resto del ensemble.
+numpy>=1.26
+scipy>=1.11
+pandas>=2.1
+polars>=1.0
+fastexcel>=0.10
+scikit-learn>=1.4
+optuna>=3.5
+deap>=1.4
+numba>=0.59
+plotly>=5.18
+duckdb>=0.10
+pydantic>=2.5
+fastapi>=0.109
+uvicorn[standard]>=0.27
+streamlit>=1.30
+rich>=13.7
+loguru>=0.7
+openpyxl>=3.1
