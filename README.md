@@ -8,23 +8,29 @@
 > No recomienda gastar más dinero.
 
 Simulador construido sobre **data histórica oficial** (powerball.com 2016–2026 +
-NY Open Data 2010–2026, **1.952 sorteos**, validadas entre sí). Analiza la era
-vigente (matriz 5/69 + 1/26, **1.361 sorteos**), aplica una batería de pruebas
-estadísticas, un ensemble multicriterio de 8 componentes y un **barrido
-exhaustivo de las 11.238.513 combinaciones** (× 26 = 292.201.338 boletos).
+NY Open Data 2010–2026 + actualizaciones, **1.967 sorteos** hasta **2026-07-04**,
+validadas entre sí). Analiza la era vigente (matriz 5/69 + 1/26, **1.376 sorteos**),
+aplica una batería de pruebas estadísticas, un ensemble multicriterio de 8
+componentes y un **barrido exhaustivo de las 11.238.513 combinaciones**
+(× 26 = 292.201.338 boletos).
+
+> **Datos al día:** para sumar sorteos nuevos, añade filas a
+> [`powerball_actualizaciones.csv`](./powerball_actualizaciones.csv)
+> (columnas `date,weekday,n1..n5,pb,power_play`). Ambos cargadores lo fusionan
+> automáticamente; no hace falta tocar los Excel.
 
 ## 📄 Informe completo
 
 👉 **[INFORME_POWERBALL.md](./INFORME_POWERBALL.md)** — resumen ejecutivo,
 metodología, análisis, modelos, pruebas, jugada final y la "Verdad matemática".
 
-## 🎯 Jugada sugerida (óptimo global, validado por 3 optimizadores)
+## 🎯 Jugada sugerida (se recalcula con cada actualización de datos)
 
-| Blancas | Powerball | Statistical Confidence Score |
-|---|---|---|
-| **03 · 23 · 36 · 53 · 63** | **04** | ≈ 89,7 / 100 |
+Con los datos hasta 2026-07-04, el óptimo determinista es `18 · 23 · 32 · 52 · 64`
++ PB `14` (SCS ≈ 91). **Cambia cuando entran sorteos nuevos** — no es fija.
 
-*El SCS mide calidad estadística, **no** probabilidad de ganar.*
+*El SCS mide calidad estadística, **no** probabilidad de ganar. Toda combinación
+tiene la misma probabilidad: 1 entre 292.201.338.*
 
 ## 🚀 Uso rápido
 

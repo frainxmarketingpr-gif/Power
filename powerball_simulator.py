@@ -55,11 +55,35 @@ MATCH5_ODDS  = 11_688_053         # premio "5 sin PB": C(69,5) * 26/25
 # ---------------------------------------------------------------------------
 # 1. CARGA Y LIMPIEZA DE DATOS
 # ---------------------------------------------------------------------------
+# Archivo de ACTUALIZACIONES: sorteos posteriores a los xlsx. Para mantener la
+# data al dia basta con anadir filas a este CSV (no hace falta tocar los Excel).
+UPDATES_CSV = "powerball_actualizaciones.csv"
+
+
+def read_updates(path: str = UPDATES_CSV) -> "pd.DataFrame | None":
+    """Lee el CSV de sorteos nuevos (date,n1..n5,pb) si existe. Devuelve un
+    DataFrame normalizado (blancas ordenadas asc) o None si no hay archivo."""
+    import os
+    if not os.path.exists(path):
+        return None
+    u = pd.read_csv(path)
+    if u.empty:
+        return None
+    out = pd.DataFrame({"date": pd.to_datetime(u["date"])})
+    whites = np.sort(u[["n1", "n2", "n3", "n4", "n5"]].astype(int).values, axis=1)
+    for i in range(5):
+        out[f"n{i+1}"] = whites[:, i]
+    out["pb"] = u["pb"].astype(int)
+    out["source"] = "powerball.com (actualizacion)"
+    return out
+
+
 def load_raw(path_2016: str, path_2010: str) -> pd.DataFrame:
     """Carga las dos fuentes oficiales, las normaliza y las fusiona.
 
     Fuente A: powerball.com (2016-2026).
     Fuente B: NY Open Data d6yy-54nr (2010-2026).
+    Fuente C: powerball_actualizaciones.csv (sorteos nuevos, si existe).
     Se usa la union; ante fechas duplicadas se conserva una sola fila
     (ambas fuentes coinciden salvo el orden de columnas).
     """
@@ -92,12 +116,20 @@ def load_raw(path_2016: str, path_2010: str) -> pd.DataFrame:
         conflicts = 0
 
     # La fuente B es la mas larga (2010+); la A solo aporta fechas ya presentes.
+    # La C (actualizaciones) aporta sorteos nuevos posteriores a los xlsx.
     # Unimos y quitamos duplicados por fecha (B tiene prioridad por cobertura).
-    full = pd.concat([fb, fa], ignore_index=True)
+    frames = [fb, fa]
+    upd = read_updates()
+    n_updates = 0
+    if upd is not None:
+        frames.append(upd)
+        n_updates = int(len(upd))
+    full = pd.concat(frames, ignore_index=True)
     full = full.drop_duplicates(subset="date", keep="first")
     full = full.sort_values("date").reset_index(drop=True)
     full.attrs["source_overlaps"] = int(len(merged))
     full.attrs["source_conflicts"] = conflicts
+    full.attrs["updates_added"] = n_updates
     return full
 
 

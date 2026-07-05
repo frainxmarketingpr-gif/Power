@@ -73,12 +73,24 @@ def load(path_2016: str, path_2010: str, rules: Rules | None = None):
     df = pf.to_pandas()
     df["date"] = pd.to_datetime(df["date"])
 
+    # Fuente C: sorteos nuevos posteriores a los xlsx (CSV de actualizaciones)
+    from powerball_simulator import read_updates
+    upd = read_updates()
+    n_updates = 0
+    if upd is not None:
+        n_updates = int(len(upd))
+        df = (pd.concat([df, upd], ignore_index=True)
+                .drop_duplicates(subset="date", keep="first")
+                .sort_values("date").reset_index(drop=True))
+        logger.info(f"Actualizaciones: +{n_updates} sorteos nuevos del CSV.")
+
     # --- Validacion analitica con DuckDB (SQL) ---
     logger.info("Validando con DuckDB (SQL)...")
     con = duckdb.connect()
     con.register("draws", df)
     rep = {}
     rep["draws_total"] = con.execute("SELECT COUNT(*) FROM draws").fetchone()[0]
+    rep["updates_added"] = n_updates
     # Discrepancias reales entre fuentes (calculadas ANTES de deduplicar)
     rep["source_overlaps"] = overlaps
     rep["source_conflicts"] = conflicts
