@@ -481,11 +481,11 @@ def run(path_2016, path_2010, mc_iters=10_000_000, n_plays=1):
     # GA/SA optimizan el MISMO objetivo restringido que el barrido (penalizan
     # los patrones populares), para que la comparacion sea justa y converjan.
     def constrained(P):
-        P = np.atleast_2d(np.asarray(P, dtype=np.int16))
-        P = np.sort(P, axis=1)
-        s = model.score_batch(P)
-        s = s - 100.0 * undesirable_mask(P, meta["sum_band"])
-        return s if len(s) > 1 else float(s[0])
+        arr = np.asarray(P, dtype=np.int16)
+        batched = arr.ndim > 1                       # discrimina por INPUT, no output
+        C2 = np.sort(np.atleast_2d(arr), axis=1)
+        s = model.score_batch(C2) - 100.0 * undesirable_mask(C2, meta["sum_band"])
+        return s if batched else float(s[0])
 
     print("\n[D] Validacion cruzada (mismo objetivo filtrado; deben converger):")
     ga_combo, ga_s = genetic_optimize(model, score_fn=constrained)

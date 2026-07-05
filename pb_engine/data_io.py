@@ -45,15 +45,24 @@ def _read_polars(path_2016: str, path_2010: str) -> pl.DataFrame:
         pl.col("powerball").cast(pl.Int64).alias("pb"),
     ).with_columns(pl.lit("ny_open_data").alias("source"))
 
+    # Antes de deduplicar: contar discrepancias REALES entre fuentes para una
+    # misma fecha (mismas 5 blancas ORDENADAS + PB). Asi el dedup no las oculta.
+    cat = pl.concat([b, a]).with_columns(
+        pl.concat_list([pl.col(c) for c in WCOLS]).list.sort().alias("_w"))
+    conflicts = (cat.group_by("date")
+                    .agg(pl.struct(["_w", "pb"]).n_unique().alias("v"))
+                    .filter(pl.col("v") > 1).height)
+    overlaps = cat.height - cat.unique(subset="date").height
+
     # B (2010+) tiene prioridad por cobertura; A solo aporta fechas ya presentes
     full = pl.concat([b, a]).unique(subset="date", keep="first").sort("date")
-    return full
+    return full, int(overlaps), int(conflicts)
 
 
 def load(path_2016: str, path_2010: str, rules: Rules | None = None):
     rules = rules or Rules()
     logger.info("Cargando fuentes con Polars...")
-    pf = _read_polars(path_2016, path_2010)
+    pf, overlaps, conflicts = _read_polars(path_2016, path_2010)
 
     # Ordenar canonicamente las 5 blancas por fila
     import numpy as np
@@ -70,8 +79,11 @@ def load(path_2016: str, path_2010: str, rules: Rules | None = None):
     con.register("draws", df)
     rep = {}
     rep["draws_total"] = con.execute("SELECT COUNT(*) FROM draws").fetchone()[0]
-    rep["date_duplicates"] = con.execute(
-        "SELECT COUNT(*)-COUNT(DISTINCT date) FROM draws").fetchone()[0]
+    # Discrepancias reales entre fuentes (calculadas ANTES de deduplicar)
+    rep["source_overlaps"] = overlaps
+    rep["source_conflicts"] = conflicts
+    if conflicts:
+        logger.warning(f"{conflicts} fechas con numeros discrepantes entre fuentes.")
     rep["nulls"] = con.execute(
         "SELECT SUM(CASE WHEN n1 IS NULL OR n2 IS NULL OR n3 IS NULL OR n4 IS NULL "
         "OR n5 IS NULL OR pb IS NULL THEN 1 ELSE 0 END) FROM draws").fetchone()[0] or 0

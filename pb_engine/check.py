@@ -82,6 +82,14 @@ def check_ticket(df: pd.DataFrame, whites, pb: int, date) -> dict:
         return {"error": f"No hay sorteo registrado en {_norm_date(date).date()} "
                          f"(Powerball sortea lun/mie/sab). Revisa la fecha o la data."}
 
+    # Solo la era vigente: antes de 2015-10-07 la matriz (y los premios) eran
+    # distintos, asi que validar un boleto actual contra esos sorteos no procede.
+    if draw.get("era") not in (None, "Actual"):
+        return {"error": f"El sorteo de {draw['date']} pertenece a la era "
+                         f"'{draw['era']}' (reglas y premios distintos). Solo se "
+                         f"verifican boletos de la era vigente 5/69 + 1/26 "
+                         f"(desde 2015-10-07)."}
+
     win_white = set(draw["blancas"])
     aciertos = sorted(set(whites) & win_white)
     pb_match = pb == draw["powerball"]
@@ -107,8 +115,12 @@ def compare_range(df: pd.DataFrame, whites, pb: int, start=None, end=None) -> di
     Util para ver cuantas veces esa combinacion habria premiado en el pasado
     (casi siempre 0 o premios minimos): ilustra lo improbable del jackpot.
     """
-    whites_set = set(int(x) for x in whites)
+    whites_list = sorted(int(x) for x in whites)
     pb = int(pb)
+    if (len(set(whites_list)) != 5 or any(not (1 <= x <= 69) for x in whites_list)
+            or not (1 <= pb <= 26)):
+        return {"error": "Boleto invalido: 5 blancas distintas 1-69 + Powerball 1-26."}
+    whites_set = set(whites_list)
     sub = df
     if start is not None:
         sub = sub[sub["date"] >= _norm_date(start)]
@@ -157,6 +169,13 @@ def _main():
     s = Settings()
     df, _ = data_io.load(s.path_2016, s.path_2010, s.rules)
     fecha = args[0]
+
+    try:
+        _norm_date(fecha)
+    except (ValueError, TypeError):
+        print(json.dumps({"error": f"Fecha invalida: {fecha!r} (usa YYYY-MM-DD)."},
+                         ensure_ascii=False))
+        raise SystemExit(1)
 
     if len(args) >= 7:
         whites = [int(x) for x in args[1:6]]

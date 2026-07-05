@@ -55,6 +55,9 @@ def numba_monte_carlo(white_w: np.ndarray, iters: int, n_white: int = 5,
                       seed: int = 20260705) -> np.ndarray:
     """Densidad empirica (0..1) de la suma de 5 blancas tras `iters` sorteos."""
     logger.info(f"Monte Carlo (Numba): {iters:,} iteraciones...")
+    if int((white_w > 0).sum()) < n_white:
+        raise ValueError(f"Se requieren >= {n_white} pesos positivos para muestrear "
+                         f"sin reemplazo; hay {int((white_w > 0).sum())}.")
     hist = _mc_sum_hist(white_w.astype(np.float64), int(iters), n_white, seed)
     if hist.max() > 0:
         hist /= hist.max()

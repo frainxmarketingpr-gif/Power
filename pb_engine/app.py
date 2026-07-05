@@ -12,8 +12,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import streamlit as st
 import plotly.graph_objects as go
 
-from pb_engine.config import Settings
+from pb_engine.config import Settings, setup_logging
 from pb_engine import pipeline
+
+setup_logging()
 
 st.set_page_config(page_title="Powerball — Simulador estadistico", layout="wide")
 

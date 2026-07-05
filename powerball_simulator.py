@@ -82,7 +82,6 @@ def load_raw(path_2016: str, path_2010: str) -> pd.DataFrame:
     # Antes de deduplicar: detectar discrepancias REALES entre fuentes para una
     # misma fecha (comparando las 5 blancas ORDENADAS + PB, para ignorar el orden
     # de columnas). Asi la deduplicacion no oculta conflictos de datos.
-    wc = [f"n{i}" for i in range(1, 6)]
     merged = fa.merge(fb, on="date", suffixes=("_a", "_b"))
     if len(merged):
         wa = np.sort(merged[[f"n{i}_a" for i in range(1, 6)]].values, axis=1)
@@ -515,8 +514,8 @@ def generate_plays(df: pd.DataFrame, a: dict, n_sim: int = 1_000_000,
     # Simular 1M+ combinaciones con el ensemble
     whites, pbs = simulate(white_w, pb_w, n_sim, rng)
 
-    # Filtrar poco recomendables
-    keep = np.array([not is_undesirable(whites[i], sum_band) for i in range(n_sim)])
+    # Filtrar poco recomendables (vectorizado; `whites` ya viene ordenado asc)
+    keep = ~undesirable_mask_vec(whites, sum_band)
     whites_f, pbs_f = whites[keep], pbs[keep]
 
     # Puntuar y elegir 20 jugadas DIVERSAS de alto score

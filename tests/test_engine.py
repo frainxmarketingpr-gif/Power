@@ -196,3 +196,26 @@ def test_check_ticket_invalid(history):
     from pb_engine import check
     assert "error" in check.check_ticket(history, [1, 2, 3, 4, 70], 6, "2026-05-25")
     assert "error" in check.check_ticket(history, [1, 2, 3, 4, 5], 6, "2026-05-24")  # sin sorteo
+
+
+def test_check_rejects_pre_2015_era(history):
+    from pb_engine import check
+    # 2011-01-19 pertenece a una era con reglas distintas -> se rechaza
+    r = check.check_ticket(history, [22, 36, 51, 56, 59], 26, "2011-01-19")
+    assert "error" in r and "era" in r["error"].lower()
+
+
+def test_compare_range_validates_ticket(history):
+    from pb_engine import check
+    assert "error" in check.compare_range(history, [1, 2, 3, 4], 5)      # 4 blancas
+    assert "error" in check.compare_range(history, [1, 2, 3, 4, 70], 5)  # fuera de rango
+    ok = check.compare_range(history, [3, 23, 36, 53, 63], 4)
+    assert "sorteos_evaluados" in ok and ok["sorteos_evaluados"] > 0
+
+
+def test_api_rejects_malformed_date():
+    from fastapi.testclient import TestClient
+    from pb_engine import api
+    c = TestClient(api.app)
+    assert c.get("/draw?date=not-a-date").status_code == 400
+    assert c.get("/check?date=99/99/9999&white=1,2,3,4,5&pb=12").status_code == 400

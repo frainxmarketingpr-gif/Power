@@ -7,20 +7,33 @@ Endpoints:
   GET /play?n=1                    -> jugada(s) sugerida(s) con SCS (NO prediccion)
   GET /draw?date=YYYY-MM-DD        -> numeros ganadores reales de esa fecha
   GET /check?date=..&white=..&pb=..-> compara un boleto contra el sorteo real
+  GET /compare?white=..&pb=..      -> cuantas veces un boleto habria premiado
 """
 from __future__ import annotations
 
 from functools import lru_cache
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query, HTTPException
 from pydantic import BaseModel
 
-from .config import Settings
+from .config import Settings, setup_logging
 from . import pipeline, data_io, check
 
+setup_logging()
 app = FastAPI(title="Powerball Simulator API",
               description="Analisis estadistico de Powerball. NO predice el sorteo "
                           "ni aumenta la probabilidad real de ganar.",
               version="1.0.0")
+
+
+def _valid_date(date: str) -> str:
+    """Valida formato de fecha (YYYY-MM-DD) o lanza HTTP 400."""
+    import pandas as pd
+    try:
+        pd.Timestamp(date)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400,
+                            detail=f"Fecha invalida: {date!r} (usa YYYY-MM-DD).")
+    return date
 
 
 class Play(BaseModel):
@@ -84,6 +97,7 @@ def _history():
 
 @app.get("/draw")
 def draw(date: str = Query(..., description="Fecha del sorteo YYYY-MM-DD")):
+    _valid_date(date)
     d = check.lookup_draw(_history(), date)
     return d or {"error": f"No hay sorteo registrado en {date} (lun/mie/sab)."}
 
@@ -92,8 +106,27 @@ def draw(date: str = Query(..., description="Fecha del sorteo YYYY-MM-DD")):
 def check_ticket(date: str = Query(..., description="Fecha del sorteo YYYY-MM-DD"),
                  white: str = Query(..., description="5 blancas separadas por coma o espacio"),
                  pb: int = Query(..., ge=1, le=26)):
+    _valid_date(date)
     try:
         whites = [int(x) for x in white.replace(",", " ").split()]
     except ValueError:
         return {"error": "Formato de blancas invalido. Ej: white=03,23,36,53,63"}
     return check.check_ticket(_history(), whites, pb, date)
+
+
+@app.get("/compare")
+def compare(white: str = Query(..., description="5 blancas separadas por coma o espacio"),
+            pb: int = Query(..., ge=1, le=26),
+            start: str | None = Query(None, description="Fecha inicial YYYY-MM-DD"),
+            end: str | None = Query(None, description="Fecha final YYYY-MM-DD")):
+    """Compara un boleto fijo contra TODOS los sorteos historicos (o un rango):
+    cuantas veces habria premiado. Ilustra lo improbable del premio."""
+    if start:
+        _valid_date(start)
+    if end:
+        _valid_date(end)
+    try:
+        whites = [int(x) for x in white.replace(",", " ").split()]
+    except ValueError:
+        return {"error": "Formato de blancas invalido. Ej: white=03,23,36,53,63"}
+    return check.compare_range(_history(), whites, pb, start, end)
