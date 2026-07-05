@@ -122,8 +122,8 @@ del azar**, no señal predictiva (lo confirma el χ² en §4).
 |---|---|---|---|
 | **χ² uniformidad blancas** | X²=83,63 (gl 68) | **0,096** | Compatible con uniforme |
 | **χ² uniformidad Powerball** | X²=23,15 (gl 25) | **0,569** | Compatible con uniforme |
-| **Kolmogorov-Smirnov (sumas)** | D=0,020 | **0,622** | Sumas ≈ Normal |
-| **Runs Test (Wald-Wolfowitz)** | z=+0,57 (692 rachas) | **0,569** | Sin patrón temporal |
+| **Kolmogorov-Smirnov (Lilliefors, sumas)** | D=0,020 | **≈0,18** (Monte Carlo, ±0,03) | Sumas ≈ Normal |
+| **Runs Test (Wald-Wolfowitz)** | z=+0,77 (688 rachas) | **0,444** | Sin patrón temporal |
 | **Autocorrelación sumas (lags 1-5)** | ≤ 0,04 en valor absoluto | — | Sin dependencia serial |
 | **Entropía de Shannon (blancas)** | 6,0997 / 6,1085 bits | — | **99,86 %** del máximo |
 | **Cadena de Markov** | P(sale\|salió)=0,070 vs P(sale\|no)=0,073 | — | **Sin memoria** |
