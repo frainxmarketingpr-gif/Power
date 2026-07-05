@@ -1,30 +1,25 @@
-# Configuracion de Replit — Simulador Powerball
-# Por defecto levanta la interfaz Streamlit (visible en el webview de Replit).
-# Para la API FastAPI o la CLI, ver los comandos comentados abajo.
+# Configuracion de Replit — Simulador Powerball (modules-based, Python 3.11)
+# Al pulsar Run: instala dependencias ligeras y levanta la interfaz Streamlit
+# (visible en el webview). Ver alternativas (API/CLI) al final.
 
-entrypoint = "pb_engine/app.py"
+entrypoint = "main.py"
 modules = ["python-3.11"]
 
-run = "streamlit run pb_engine/app.py --server.port 8080 --server.address 0.0.0.0 --server.headless true"
-
-[nix]
-channel = "stable-24_05"
+run = "pip install -q -r requirements-lite.txt && streamlit run pb_engine/app.py --server.port 8080 --server.address 0.0.0.0 --server.headless true"
 
 [env]
 PYTHONUNBUFFERED = "1"
-# Numba/pytensor: cache en carpeta escribible del contenedor
 NUMBA_CACHE_DIR = "/tmp/numba_cache"
-PYTENSOR_FLAGS = "cxx="   # evita compilar C (usa backend Python de pytensor si falta g++)
-
-[deployment]
-run = ["sh", "-c", "streamlit run pb_engine/app.py --server.port 8080 --server.address 0.0.0.0 --server.headless true"]
-deploymentTarget = "cloudrun"
 
 [[ports]]
 localPort = 8080
 externalPort = 80
 
-# --- Alternativas (cambia la linea `run` de arriba) ---
-# API REST:  uvicorn pb_engine.api:app --host 0.0.0.0 --port 8080
-# CLI:       python -m pb_engine.cli powerball_results_20160601_to_20260601.xlsx powerball_resultados.xlsx
-# Tests:     pytest -q
+[deployment]
+deploymentTarget = "cloudrun"
+run = ["sh", "-c", "pip install -q -r requirements-lite.txt && streamlit run pb_engine/app.py --server.port 8080 --server.address 0.0.0.0 --server.headless true"]
+
+# --- Alternativas (cambia la linea `run` de arriba, o usa el Shell) ---
+# Analisis por consola:  python main.py
+# API REST:              pip install -r requirements-lite.txt && uvicorn pb_engine.api:app --host 0.0.0.0 --port 8080
+# Tests:                 pip install -r requirements-lite.txt pytest && pytest -q

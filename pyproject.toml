@@ -12,8 +12,8 @@ dependencies = [
     "scipy>=1.11",
     "pandas>=2.1",
     "polars>=1.0",
+    "fastexcel>=0.10",
     "scikit-learn>=1.4",
-    "pymc>=5.10",
     "optuna>=3.5",
     "deap>=1.4",
     "numba>=0.59",
@@ -29,6 +29,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# PyMC (MCMC/NUTS) es OPCIONAL: pesa mucho y compila en C. El pipeline degrada
+# con elegancia si falta. Instalar con:  pip install -e ".[full]"
+full = ["pymc>=5.10"]
 dev = ["pytest>=8.0", "httpx>=0.26"]
 gpu = ["cupy-cuda12x>=13.0"]   # opcional si hay GPU NVIDIA
 

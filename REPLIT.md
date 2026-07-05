@@ -1,30 +1,35 @@
 # Cómo correr el simulador en Replit
 
-Sí, corre en Replit. El repo ya trae `.replit`, `replit.nix` y `.streamlit/`
-configurados. Elige una de estas rutas según tu plan.
+Sí, corre en Replit. El repo ya trae `main.py`, `.replit` (módulo
+`python-3.11`) y `.streamlit/` configurados. Elige una de estas rutas.
 
-## Opción A — Rápida (recomendada, free tier)
+## Opción A — Rápida (recomendada) — simplemente pulsa Run
 
 1. **Create Repl → Import from GitHub** → pega la URL del repo.
-2. En el panel *Shell*:
-   ```bash
-   pip install -r requirements-lite.txt
-   ```
-   *(La versión "lite" omite PyMC, que compila en C y pesa mucho. El sistema lo
-   detecta y sigue funcionando: solo se salta el módulo MCMC bayesiano.)*
-3. Pulsa **Run**. Se abre la interfaz **Streamlit** en el webview.
-   - Deja el Monte Carlo en **1.000.000** de iteraciones (suficiente y ligero).
+   - Replit detecta el proyecto por `main.py` + `.replit` (módulo `python-3.11`).
+2. Pulsa **Run**. El `.replit` ya hace `pip install -r requirements-lite.txt` y
+   levanta **Streamlit** en el webview automáticamente.
+   - Deja el Monte Carlo en **1.000.000** de iteraciones (ligero).
+
+> La versión "lite" omite **PyMC** (compila en C y pesa mucho). El sistema lo
+> detecta y sigue funcionando: solo se salta el módulo MCMC bayesiano.
+
+Si prefieres el análisis por consola en vez de la web, en el *Shell*:
+```bash
+python main.py
+```
 
 ## Opción B — Completa (incluye PyMC/MCMC)
 
-Requiere un plan con más RAM/almacenamiento (PyMC + pytensor son pesados).
+Requiere un plan con más RAM/almacenamiento (PyMC + pytensor son pesados) y un
+compilador C. En el *Shell*:
 
 ```bash
-pip install -r requirements.txt
+pip install -r requirements.txt          # o:  pip install -e ".[full]"
 ```
 
-`replit.nix` ya incluye `gcc`/`gfortran` para compilar pytensor. La primera
-ejecución de PyMC tarda unos segundos en compilar.
+Si PyMC no compila en tu plan de Replit, **no pasa nada**: el pipeline reporta
+"PyMC no disponible" y continúa con el resto del ensemble.
 
 ## Cambiar qué se ejecuta
 
@@ -48,6 +53,8 @@ pytest -q
 
 | Situación | Qué hacer |
 |---|---|
+| **Replit no reconoce el proyecto** | Asegúrate de que existan `main.py` y `.replit` en la raíz (ya incluidos). No debe haber `replit.nix` cuando `.replit` usa `modules` — se ignoran entre sí. Reimporta el repo si lo clonaste con la config vieja. |
+| No aparece el botón Run | El `entrypoint = "main.py"` y `modules = ["python-3.11"]` del `.replit` lo habilitan; refresca la pestaña. |
 | Free tier (RAM/almacenamiento justos) | `requirements-lite.txt`; Monte Carlo 1M |
 | Instalación muy lenta | Instala primero `numpy scipy pandas`, luego el resto |
 | PyMC no instala/compila | Ignóralo: el pipeline reporta "PyMC no disponible" y continúa |

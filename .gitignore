@@ -7,3 +7,11 @@ __pycache__/
 # artefactos generados
 powerball_dashboard.html
 jugada_sugerida.csv
+# artefactos de Replit
+.pythonlibs/
+.upm/
+.config/
+.cache/
+poetry.lock
+uv.lock
+replit.nix
