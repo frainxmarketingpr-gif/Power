@@ -1,0 +1,52 @@
+[project]
+name = "powerball-simulator"
+version = "1.0.0"
+description = "Simulador estadistico avanzado de Powerball (ensemble multicriterio). NO predice el sorteo."
+readme = "INFORME_POWERBALL.md"
+requires-python = ">=3.11"   # recomendado 3.12+
+license = { text = "MIT" }
+authors = [{ name = "Data Science" }]
+
+dependencies = [
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "pandas>=2.1",
+    "polars>=1.0",
+    "scikit-learn>=1.4",
+    "pymc>=5.10",
+    "optuna>=3.5",
+    "deap>=1.4",
+    "numba>=0.59",
+    "plotly>=5.18",
+    "duckdb>=0.10",
+    "pydantic>=2.5",
+    "fastapi>=0.109",
+    "uvicorn[standard]>=0.27",
+    "streamlit>=1.30",
+    "rich>=13.7",
+    "loguru>=0.7",
+    "openpyxl>=3.1",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "httpx>=0.26"]
+gpu = ["cupy-cuda12x>=13.0"]   # opcional si hay GPU NVIDIA
+
+[project.scripts]
+powerball = "pb_engine.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+# ---- Instalacion recomendada ----
+# pip:   pip install numpy scipy pandas polars scikit-learn pymc optuna deap \
+#                    numba plotly duckdb pydantic fastapi "uvicorn[standard]" \
+#                    streamlit pytest rich loguru
+# uv:    uv sync
+# poetry: poetry install
+# GPU (opcional): pip install cupy-cuda12x
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
