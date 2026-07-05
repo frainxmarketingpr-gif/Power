@@ -30,11 +30,19 @@ with st.sidebar:
     n_plays = st.slider("Numero de jugadas", 1, 20, 1)
     mc = st.select_slider("Iteraciones Monte Carlo",
                           [1_000_000, 5_000_000, 10_000_000], value=1_000_000)
+    variety = st.toggle("Variedad (jugadas distintas cada vez)", value=True,
+                        help="Elige al azar entre las mejores combinaciones "
+                             "(todas de score casi identico y misma probabilidad "
+                             "real). Desactivalo para el maximo global fijo.")
     run_btn = st.button("Ejecutar simulacion", type="primary")
 
 
 if run_btn:
-    res = pipeline.run(Settings(n_plays=n_plays, mc_iters=mc))
+    import os
+    # Semilla de eleccion nueva por corrida -> jugadas distintas en modo variedad
+    pick_seed = int.from_bytes(os.urandom(4), "little") if variety else None
+    res = pipeline.run(Settings(n_plays=n_plays, mc_iters=mc,
+                                variety=variety, pick_seed=pick_seed))
     c1, c2 = st.columns(2)
     with c1:
         st.subheader("Validacion de datos")

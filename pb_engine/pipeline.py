@@ -109,9 +109,22 @@ def run(settings: Settings | None = None) -> Result:
 
     # 8) Seleccion final (diversa): <=2 blancas compartidas; relaja a <=3 si no
     #    hay suficientes, para no devolver menos jugadas de las pedidas.
+    #
+    #    - Modo determinista (variety=False): recorre C en orden de score -> el
+    #      maximo global; SIEMPRE devuelve la misma jugada (los datos no cambian).
+    #    - Modo variedad (variety=True): baraja el pool de las `top_pool` mejores
+    #      (todas de score casi identico y misma probabilidad real) con una
+    #      semilla que cambia por corrida -> jugadas distintas cada vez.
+    pick_rng = np.random.default_rng(s.pick_seed if s.pick_seed is not None else s.seed)
+    if s.variety:
+        pool_n = min(len(C), s.top_pool)
+        order = list(pick_rng.permutation(pool_n))
+    else:
+        order = list(range(len(C)))
+
     def _select(max_overlap):
         out = []
-        for k in range(len(C)):
+        for k in order:
             combo = tuple(int(x) for x in C[k])
             if all(len(set(combo) & set(c)) <= max_overlap for c, _ in out):
                 out.append((combo, float(S[k])))
@@ -124,11 +137,16 @@ def run(settings: Settings | None = None) -> Result:
         chosen = _select(3)
     if len(chosen) < s.n_plays:
         logger.warning(f"Solo {len(chosen)} jugadas diversas de {s.n_plays} pedidas.")
-    # PB diversificado por jugada (el PB es equiprobable; evita repetir uno solo)
+    # Powerball (equiprobable): en modo variedad se elige al azar entre los mas
+    # frecuentes; en modo determinista se reparten los top por jugada.
     top_pbs = (np.argsort(a["pb_freq"].values)[::-1] + r.pb_min).astype(int)
+    if s.variety:
+        pbs = [int(x) for x in pick_rng.choice(top_pbs[:10], size=len(chosen))]
+    else:
+        pbs = [int(top_pbs[(i) % len(top_pbs)]) for i in range(len(chosen))]
     plays = pd.DataFrame([
         dict(jugada=i, blancas=" ".join(f"{x:02d}" for x in c),
-             powerball=int(top_pbs[(i - 1) % len(top_pbs)]), scs=round(sc, 2))
+             powerball=pbs[i - 1], scs=round(sc, 2))
         for i, (c, sc) in enumerate(chosen, 1)
     ])
 

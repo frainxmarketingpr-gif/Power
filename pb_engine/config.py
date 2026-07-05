@@ -72,6 +72,12 @@ class Settings(BaseModel):
     prior_strength: float = 69.0
     seed: int = 20260705
     n_plays: int = 1
+    # Variedad: si True, elige al azar entre las mejores combinaciones (todas de
+    # score casi identico y misma probabilidad real) -> jugadas distintas por
+    # corrida. Si False, es determinista y devuelve siempre el maximo global.
+    variety: bool = False
+    top_pool: int = 500            # tamano del pool de mejores para la variedad
+    pick_seed: int | None = None   # semilla de la eleccion (None -> usa `seed`)
     weights: ScoreWeights = Field(default_factory=ScoreWeights)
     rules: Rules = Field(default_factory=Rules)
 
