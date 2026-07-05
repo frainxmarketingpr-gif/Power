@@ -45,12 +45,15 @@ def run(settings: Settings | None = None) -> Result:
     a = base.analyze(cur)
     tests = adv.statistical_tests(cur, a)
 
-    # 3) Modelo ensemble; se sustituye el Monte Carlo por el motor NUMBA (10M+)
-    logger.info("Construyendo ensemble (bootstrap + bayes)...")
-    model = adv.EnsembleModel(cur, a, mc_iters=200_000, boot_reps=s.boot_reps,
-                              recent_k=s.recent_k, seed=s.seed)
+    # 3) Modelo ensemble. La densidad de sumas (criterio Monte Carlo) se calcula
+    #    con el motor NUMBA (10M+) y se INYECTA al modelo -> no se recalcula el MC
+    #    interno. half_life y prior_strength se propagan de forma coherente.
+    logger.info("Construyendo ensemble (Numba MC + bootstrap + bayes)...")
     bw, _ = base.weights_bayesian(a, prior_strength=s.prior_strength)
-    model.sum_density = engines.numba_monte_carlo(bw, s.mc_iters, r.n_white, s.seed)
+    sum_density = engines.numba_monte_carlo(bw, s.mc_iters, r.n_white, s.seed)
+    model = adv.EnsembleModel(cur, a, boot_reps=s.boot_reps, recent_k=s.recent_k,
+                              seed=s.seed, half_life=s.half_life,
+                              prior_strength=s.prior_strength, sum_density=sum_density)
     model.mc_iters = s.mc_iters
     # Aplica los pesos configurados (Pydantic-validados)
     model.WEIGHTS = s.weights.model_dump()
@@ -93,23 +96,39 @@ def run(settings: Settings | None = None) -> Result:
     # muestras 'tipicas' = alto SCS; 'populares' = patrones a evitar
     typ_C = C[:2000]
     pop_C = _popular_samples(rng, r, 2000)
-    typ_feat = engines.sklearn_scale(model.feature_batch(typ_C))
-    pop_feat = engines.sklearn_scale(model.feature_batch(pop_C))
+    # Escalado MinMax CONJUNTO (un solo scaler sobre la union): asi las features
+    # siguen siendo comparables entre 'tipicas' y 'populares' y la brecha que
+    # Optuna maximiza es real, no un artefacto de escalar cada grupo por separado.
+    raw_typ = model.feature_batch(typ_C)
+    raw_pop = model.feature_batch(pop_C)
+    both = engines.sklearn_scale(np.vstack([raw_typ, raw_pop]))
+    typ_feat, pop_feat = both[:len(raw_typ)], both[len(raw_typ):]
     weighted = lambda feats, w: feats @ w
     best_w, gap = engines.optuna_tune_weights(weighted, pop_feat, typ_feat, seed=s.seed)
     optuna_res = dict(best_weights=best_w, separation_gap=gap)
 
-    # 8) Seleccion final (diversa)
-    chosen = []
-    for k in range(len(C)):
-        combo = tuple(int(x) for x in C[k])
-        if all(len(set(combo) & set(c)) <= 2 for c, _ in chosen):
-            chosen.append((combo, float(S[k])))
-        if len(chosen) == s.n_plays:
-            break
+    # 8) Seleccion final (diversa): <=2 blancas compartidas; relaja a <=3 si no
+    #    hay suficientes, para no devolver menos jugadas de las pedidas.
+    def _select(max_overlap):
+        out = []
+        for k in range(len(C)):
+            combo = tuple(int(x) for x in C[k])
+            if all(len(set(combo) & set(c)) <= max_overlap for c, _ in out):
+                out.append((combo, float(S[k])))
+            if len(out) == s.n_plays:
+                break
+        return out
+
+    chosen = _select(2)
+    if len(chosen) < s.n_plays:
+        chosen = _select(3)
+    if len(chosen) < s.n_plays:
+        logger.warning(f"Solo {len(chosen)} jugadas diversas de {s.n_plays} pedidas.")
+    # PB diversificado por jugada (el PB es equiprobable; evita repetir uno solo)
+    top_pbs = (np.argsort(a["pb_freq"].values)[::-1] + r.pb_min).astype(int)
     plays = pd.DataFrame([
         dict(jugada=i, blancas=" ".join(f"{x:02d}" for x in c),
-             powerball=model.best_pb, scs=round(sc, 2))
+             powerball=int(top_pbs[(i - 1) % len(top_pbs)]), scs=round(sc, 2))
         for i, (c, sc) in enumerate(chosen, 1)
     ])
 
@@ -124,8 +143,8 @@ def _popular_samples(rng, rules, n):
         kind = rng.integers(0, 3)
         if kind == 0:                      # cumpleanos: todo <=31
             c = np.sort(rng.choice(np.arange(1, 32), rules.n_white, replace=False))
-        elif kind == 1:                    # secuencia consecutiva
-            start = rng.integers(1, rules.white_max - rules.n_white)
+        elif kind == 1:                    # secuencia consecutiva (incluye 65-69)
+            start = rng.integers(1, rules.white_max - rules.n_white + 2)
             c = np.arange(start, start + rules.n_white)
         else:                              # numeros redondos / misma decena
             base_d = rng.integers(0, 6) * 10

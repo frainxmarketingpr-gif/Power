@@ -31,13 +31,20 @@ def _mc_sum_hist(white_w, iters, n_white, seed):
         for _pick in range(n_white):
             r = np.random.random() * total
             acc = 0.0
-            idx = 0
+            idx = -1
             for k in range(K):
+                if w[k] <= 0.0:          # bola ya extraida: no re-elegible
+                    continue
                 acc += w[k]
                 if acc >= r:
                     idx = k
                     break
-            s += idx + 1            # numero = indice + 1
+            if idx < 0:                  # deriva de flotantes: ultimo valido
+                for k in range(K - 1, -1, -1):
+                    if w[k] > 0.0:
+                        idx = k
+                        break
+            s += idx + 1                 # numero = indice + 1
             total -= w[idx]
             w[idx] = 0.0
         hist[s] += 1.0

@@ -7,7 +7,7 @@ from rich.table import Table
 from rich.panel import Panel
 from rich import box
 
-from .config import Settings
+from .config import Settings, setup_logging
 from . import pipeline, viz
 
 console = Console()
@@ -23,7 +23,8 @@ def _tests_table(t: dict) -> Table:
                 "uniforme" if pw > .05 else "rechaza")
     tab.add_row("Chi2 Powerball", f"{cp:.2f} (gl {dfp})", f"{pp:.3f}",
                 "uniforme" if pp > .05 else "rechaza")
-    tab.add_row("KS sumas~Normal", f"D={ksd:.3f}", f"{ksp:.3f}", "normal")
+    tab.add_row("KS sumas~Normal", f"D={ksd:.3f}", f"{ksp:.3f}",
+                "~normal" if ksp > .05 else "rechaza")
     tab.add_row("Runs (Wald-Wolfowitz)", f"z={zr:+.2f}", f"{pr:.3f}",
                 "aleatorio" if pr > .05 else "patron")
     tab.add_row("Entropia blancas", f"{H:.3f}/{Hmax:.3f} bits", f"{100*Hr:.2f}%", "casi maxima")
@@ -32,6 +33,7 @@ def _tests_table(t: dict) -> Table:
 
 
 def main():
+    setup_logging()
     args = sys.argv[1:]
     s = Settings(path_2016=args[0], path_2010=args[1]) if len(args) >= 2 else Settings()
 
@@ -70,7 +72,7 @@ def main():
                      str(row["powerball"]), f"{row['scs']:.2f}")
     console.print(play)
 
-    html = viz.dashboard(res.analysis, res.model, res.tests)
+    html = viz.dashboard(res.analysis, res.model, res.exhaustive[0])
     console.print(f"[dim]Dashboard Plotly guardado en {html}[/dim]")
     console.print(f"[bold red]Probabilidad real de jackpot: 1 entre "
                   f"{s.rules.jackpot_odds:,} (igual para toda combinacion).[/bold red]")

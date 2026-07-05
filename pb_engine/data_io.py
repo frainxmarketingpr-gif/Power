@@ -28,14 +28,19 @@ def _read_polars(path_2016: str, path_2010: str) -> pl.DataFrame:
     a = pl.read_excel(path_2016, sheet_name="Datos")
     b = pl.read_excel(path_2010, sheet_name="Todos_desde_2010")
 
+    # La fecha se maneja como texto ISO (YYYY-MM-DD): ordena cronologicamente y
+    # pandas la parsea despues. Evita el casteo String->Date (deprecado en Polars).
+    def _date_str(col):
+        return pl.col(col).cast(pl.Utf8).str.slice(0, 10).alias("date")
+
     a = a.select(
-        pl.col("date").cast(pl.Date).alias("date"),
+        _date_str("date"),
         *[pl.col(f"number_{i}").cast(pl.Int64).alias(f"n{i}") for i in range(1, 6)],
         pl.col("powerball").cast(pl.Int64).alias("pb"),
     ).with_columns(pl.lit("powerball.com").alias("source"))
 
     b = b.select(
-        pl.col("fecha_sorteo").cast(pl.Date).alias("date"),
+        _date_str("fecha_sorteo"),
         *[pl.col(f"bola_blanca_{i}").cast(pl.Int64).alias(f"n{i}") for i in range(1, 6)],
         pl.col("powerball").cast(pl.Int64).alias("pb"),
     ).with_columns(pl.lit("ny_open_data").alias("source"))

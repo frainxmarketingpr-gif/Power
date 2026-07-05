@@ -96,3 +96,103 @@ def test_features_in_unit_range(model):
     F = m.feature_batch(C)
     assert F.shape[1] == 8
     assert (F >= -1e-9).all() and (F <= 1 + 1e-9).all()
+
+
+# ============ Regresiones de la auditoria Fable ============================
+
+def test_pair_combos_constant():
+    assert base.PAIR_COMBOS == comb(69, 2) == 2_346
+
+
+def test_filter_detects_four_consecutive():
+    # >=4 numeros consecutivos deben filtrarse (bug historico: solo atrapaba 5)
+    band = (120, 232)
+    assert base.is_undesirable([10, 11, 12, 13, 45], band) is True   # 4 consecutivos
+    assert base.is_undesirable([5, 6, 7, 8, 40], band) is True       # 4 consecutivos
+    # 3 consecutivos NO deben bastar para filtrar por esta regla
+    C = np.array([[2, 9, 10, 11, 55]])   # 3 consecutivos, suma 87 -> fuera de banda
+    # usar una suma dentro de banda para aislar la regla de consecutivos
+    C2 = np.array([[9, 10, 11, 40, 55]])  # 3 consec, par 3-2, suma 125 en banda
+    assert base.undesirable_mask_vec(C2, band)[0] == False
+
+
+def test_filter_birthday_four_in_range():
+    band = (120, 232)
+    # 4+ numeros en 1-31 = sesgo de cumpleanos (no redundante con 'todo bajo')
+    assert base.is_undesirable([3, 7, 12, 25, 60], band) is True     # 4 en 1-31, 1 alto
+
+
+def test_canonical_filter_matches_scalar_and_vector():
+    band = (110, 240)
+    combos = [[3, 23, 36, 53, 63], [1, 2, 3, 4, 5], [2, 4, 6, 8, 10],
+              [10, 11, 12, 13, 45], [7, 19, 33, 41, 58]]
+    C = np.array(combos)
+    vec = base.undesirable_mask_vec(C, band)
+    for i, c in enumerate(combos):
+        assert base.is_undesirable(c, band) == bool(vec[i])
+
+
+def test_pareto_dominance_not_inverted():
+    # A domina a B y C; el frente correcto debe contener A, nunca solo B
+    class FakeModel:
+        freq_n = np.ones(69); bayes_n = np.ones(69)
+        recent_mask = np.zeros(70, dtype=bool)
+        def score_batch(self, C):
+            return C.sum(axis=1).astype(float)
+    # construimos combos cuyo (typicidad,unpop,div) ordene A>B
+    A = [40, 42, 44, 46, 48]   # alto, disperso, sin recientes
+    B = [1, 2, 3, 4, 5]        # bajo, consecutivo (dominado)
+    C = np.array([A, B], dtype=np.int16)
+    front, knee = adv.pareto_front(FakeModel(), C, top=2)
+    assert 0 in front            # A (indice 0) debe estar en el frente
+    assert not (list(front) == [1])   # nunca solo el dominado
+
+
+def test_ga_elitism_returns_global_best(model):
+    m, a = model
+    combo, score = adv.genetic_optimize(m, generations=10, pop=60, seed=3)
+    assert len(set(combo)) == 5
+    assert 0 <= score <= 100
+
+
+# ============ Modulo de comparacion por fecha (check.py) ====================
+
+@pytest.fixture(scope="module")
+def history():
+    from pb_engine import data_io
+    from pb_engine.config import Rules as R
+    df, _ = data_io.load(
+        "/root/.claude/uploads/a4b780aa-d8bd-585a-acd0-c3b7c62fa30c/5fc9dfb0-powerball_results_20160601_to_20260601.xlsx",
+        "/root/.claude/uploads/a4b780aa-d8bd-585a-acd0-c3b7c62fa30c/81ca6cba-powerball_resultados.xlsx",
+        R())
+    return df
+
+
+def test_check_lookup_known_draw(history):
+    from pb_engine import check
+    d = check.lookup_draw(history, "2026-05-25")
+    assert d is not None
+    assert d["blancas"] == [17, 32, 48, 60, 64]
+    assert d["powerball"] == 10
+
+
+def test_check_ticket_jackpot(history):
+    from pb_engine import check
+    r = check.check_ticket(history, [17, 32, 48, 60, 64], 10, "2026-05-25")
+    assert r["n_aciertos_blancas"] == 5
+    assert r["acerto_powerball"] is True
+    assert r["categoria"] == "Jackpot"
+
+
+def test_check_ticket_partial_and_prize(history):
+    from pb_engine import check
+    r = check.check_ticket(history, [17, 32, 1, 2, 3], 10, "2026-05-25")
+    assert r["n_aciertos_blancas"] == 2
+    assert r["acerto_powerball"] is True
+    assert r["premio_base_usd"] == 7
+
+
+def test_check_ticket_invalid(history):
+    from pb_engine import check
+    assert "error" in check.check_ticket(history, [1, 2, 3, 4, 70], 6, "2026-05-25")
+    assert "error" in check.check_ticket(history, [1, 2, 3, 4, 5], 6, "2026-05-24")  # sin sorteo

@@ -47,6 +47,7 @@ RULE_ERAS = [
 
 # Probabilidades combinatorias exactas de la era actual
 WHITE_COMBOS = 11_238_513         # C(69,5): nº de combinaciones de 5 blancas
+PAIR_COMBOS  = 2_346              # C(69,2): nº de pares de blancas posibles
 JACKPOT_ODDS = 292_201_338        # C(69,5) * 26  (jackpot: 5 blancas + PB)
 MATCH5_ODDS  = 11_688_053         # premio "5 sin PB": C(69,5) * 26/25
 
@@ -78,11 +79,27 @@ def load_raw(path_2016: str, path_2010: str) -> pd.DataFrame:
     fb["pb"] = b["powerball"].astype(int)
     fb["source"] = "ny_open_data"
 
+    # Antes de deduplicar: detectar discrepancias REALES entre fuentes para una
+    # misma fecha (comparando las 5 blancas ORDENADAS + PB, para ignorar el orden
+    # de columnas). Asi la deduplicacion no oculta conflictos de datos.
+    wc = [f"n{i}" for i in range(1, 6)]
+    merged = fa.merge(fb, on="date", suffixes=("_a", "_b"))
+    if len(merged):
+        wa = np.sort(merged[[f"n{i}_a" for i in range(1, 6)]].values, axis=1)
+        wb = np.sort(merged[[f"n{i}_b" for i in range(1, 6)]].values, axis=1)
+        disagree = (wa != wb).any(axis=1) | (merged["pb_a"].values != merged["pb_b"].values)
+        conflicts = int(disagree.sum())
+    else:
+        conflicts = 0
+
     # La fuente B es la mas larga (2010+); la A solo aporta fechas ya presentes.
     # Unimos y quitamos duplicados por fecha (B tiene prioridad por cobertura).
     full = pd.concat([fb, fa], ignore_index=True)
     full = full.drop_duplicates(subset="date", keep="first")
-    return full.sort_values("date").reset_index(drop=True)
+    full = full.sort_values("date").reset_index(drop=True)
+    full.attrs["source_overlaps"] = int(len(merged))
+    full.attrs["source_conflicts"] = conflicts
+    return full
 
 
 def clean_and_validate(df: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
@@ -98,6 +115,9 @@ def clean_and_validate(df: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
     report["draws_total"] = len(df)
     report["date_duplicates"] = int(df.duplicated("date").sum())
     report["exact_combo_repeats"] = int(combo_key.duplicated().sum())
+    # Discrepancias reales entre fuentes (calculadas antes de deduplicar)
+    report["source_overlaps"] = df.attrs.get("source_overlaps", 0)
+    report["source_conflicts"] = df.attrs.get("source_conflicts", 0)
 
     # Validacion de rango por era de reglas
     def era_of(d):
@@ -131,8 +151,12 @@ def current_era(df: pd.DataFrame) -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 def analyze(df: pd.DataFrame) -> dict:
     wcols = [f"n{i}" for i in range(1, 6)]
-    whites = df[wcols].values.ravel()
     n_draws = len(df)
+    if n_draws < 2:
+        raise ValueError(
+            f"Se requieren >=2 sorteos de la era actual para el analisis; "
+            f"hay {n_draws}. Revisa las rutas de datos o el rango de fechas.")
+    whites = df[wcols].values.ravel()
 
     # Frecuencia de cada blanca y del powerball
     white_freq = pd.Series(0, index=range(WHITE_MIN, WHITE_MAX + 1), dtype=int)
@@ -259,37 +283,46 @@ def simulate(white_w: np.ndarray, pb_w: np.ndarray, n: int, rng: np.random.Gener
 # ---------------------------------------------------------------------------
 # 5. FILTROS DE COMBINACIONES POCO RECOMENDABLES
 # ---------------------------------------------------------------------------
-def is_undesirable(combo: np.ndarray, sum_band: tuple[int, int]) -> bool:
-    """True si la combinacion cae en un patron popular / poco recomendable.
-    (No cambia la probabilidad de acertar; reduce el riesgo de compartir premio.)"""
-    s = sorted(int(x) for x in combo)
-    diffs = np.diff(s)
+def undesirable_mask_vec(C: np.ndarray, sum_band: tuple[int, int]) -> np.ndarray:
+    """Mascara booleana (vectorizada) de combinaciones populares / poco
+    recomendables. FUENTE UNICA del filtro: la usan is_undesirable,
+    exhaustive_best y powerball_advanced.undesirable_mask.
 
-    # a) Secuencia totalmente consecutiva (1-2-3-4-5) o casi (>=4 consecutivos)
-    if (diffs == 1).sum() >= 4:
-        return True
-    # b) Progresion aritmetica exacta (1-11-21-31-41, etc.)
-    if len(set(diffs)) == 1:
-        return True
-    # c) Todos bajos (<=34) o todos altos (>=35)
-    if s[-1] <= 34 or s[0] >= 35:
-        return True
-    # d) Todos pares o todos impares
-    par = sum(x % 2 == 0 for x in s)
-    if par in (0, 5):
-        return True
-    # e) Sesgo de cumpleanos: las 5 dentro de 1-31 (dias del mes)
-    if s[-1] <= 31:
-        return True
-    # f) Suma fuera de la banda central historica (colas improbables)
-    if not (sum_band[0] <= sum(s) <= sum_band[1]):
-        return True
-    # g) Patron visual: todas terminan en el mismo digito, o >=4 en la misma decena
-    if len(set(x % 10 for x in s)) == 1:
-        return True
-    if max(Counter(x // 10 for x in s).values()) >= 4:
-        return True
-    return False
+    C: (m,5) int con las blancas ORDENADAS ascendentemente.
+    (Filtrar no cambia la probabilidad de acertar; reduce el riesgo de
+    compartir premio y descarta patrones populares.)"""
+    C = np.asarray(C)
+    diffs = np.diff(C, axis=1)                       # (m,4)
+    s0, s4 = C[:, 0], C[:, -1]
+    ssum = C.sum(axis=1)
+    par = (C % 2 == 0).sum(axis=1)
+    # a) >=4 numeros consecutivos = 3 diffs de 1 adyacentes (incluye 1-2-3-4-5)
+    run4 = ((diffs[:, :-2] == 1) & (diffs[:, 1:-1] == 1) & (diffs[:, 2:] == 1)).any(axis=1)
+    # b) progresion aritmetica exacta (todas las diffs iguales)
+    arith = (np.ptp(diffs, axis=1) == 0)
+    # c) todas bajas (<=34) o todas altas (>=35)
+    lo_hi = (s4 <= 34) | (s0 >= 35)
+    # d) todas pares o todas impares
+    parity = (par == 0) | (par == 5)
+    # e) sesgo de cumpleanos: 4+ numeros en 1-31 (dias del mes) -- no redundante
+    birthday = (C <= 31).sum(axis=1) >= 4
+    # f) suma fuera de la banda central historica (colas improbables)
+    out_sum = (ssum < sum_band[0]) | (ssum > sum_band[1])
+    # g) patron visual: mismo ultimo digito, o 4+ en una misma decena
+    last_digit_same = (np.ptp(C % 10, axis=1) == 0)
+    dec = C // 10
+    dec_max = np.zeros(len(C), dtype=np.int8)
+    for d in range(0, 7):
+        dec_max = np.maximum(dec_max, (dec == d).sum(axis=1).astype(np.int8))
+    visual = last_digit_same | (dec_max >= 4)
+    return run4 | arith | lo_hi | parity | birthday | out_sum | visual
+
+
+def is_undesirable(combo: np.ndarray, sum_band: tuple[int, int]) -> bool:
+    """True si UNA combinacion cae en un patron popular / poco recomendable.
+    Delega en la mascara vectorizada canonica."""
+    C = np.sort(np.asarray(combo, dtype=np.int64).reshape(1, -1), axis=1)
+    return bool(undesirable_mask_vec(C, sum_band)[0])
 
 
 # ---------------------------------------------------------------------------
@@ -318,7 +351,7 @@ class Scorer:
         f_score = self.white_freq_n[idx].mean()                    # 0..1
         r_score = self.recency_n[idx].mean()                       # 0..1
         pair_score = np.mean([self.pair_sup.get(p, 0) for p in itertools.combinations(s, 2)])
-        pair_score = pair_score / (self.a["n_draws"] * 10 / WHITE_COMBOS + 1e-9)
+        pair_score = pair_score / (self.a["n_draws"] * 10 / PAIR_COMBOS + 1e-9)
         pair_score = min(pair_score / 5.0, 1.0)
         # Tipicidad de la suma (cercania al centro de la distribucion historica)
         z = abs(sum(s) - self.sum_mu) / self.sum_sd
@@ -348,7 +381,7 @@ class Scorer:
 # ---------------------------------------------------------------------------
 def exhaustive_best(df: pd.DataFrame, a: dict, n_plays: int = 1,
                     batch: int = 1_000_000):
-    """Evalua TODO el espacio: C(69,5)=11.688.053 combos de blancas x 26 PB
+    """Evalua TODO el espacio: C(69,5)=11.238.513 combos de blancas x 26 PB
     = 292.201.338 boletos. Cobertura total y determinista (sin azar).
 
     Puntua cada combinacion de blancas con el mismo criterio de tipicidad del
@@ -368,7 +401,7 @@ def exhaustive_best(df: pd.DataFrame, a: dict, n_plays: int = 1,
     for (i, j), c in a["pairs"].items():
         PAIR[i - 1, j - 1] = c
         PAIR[j - 1, i - 1] = c
-    pair_norm = (n_draws * 10 / WHITE_COMBOS + 1e-9)
+    pair_norm = (n_draws * 10 / PAIR_COMBOS + 1e-9)
 
     sums = a["sums"]
     lo_band = int(np.percentile(sums, 10))
@@ -394,34 +427,15 @@ def exhaustive_best(df: pd.DataFrame, a: dict, n_plays: int = 1,
         total += m
         idx = C - WHITE_MIN
 
-        # ---- FILTROS (patrones populares / poco recomendables) ----
-        diffs = np.diff(C, axis=1)
-        s0, s4 = C[:, 0], C[:, 4]
-        ssum = C.sum(axis=1).astype(np.int32)
-        par = (C % 2 == 0).sum(axis=1)
-        low = (C <= 34).sum(axis=1)
-        last_digit_same = (np.ptp(C % 10, axis=1) == 0)
-        dec = C // 10
-        # max conteo de decena por fila
-        dec_max = np.zeros(m, dtype=np.int8)
-        for d in range(0, 7):
-            cnt = (dec == d).sum(axis=1)
-            dec_max = np.maximum(dec_max, cnt.astype(np.int8))
-
-        bad = (
-            ((diffs == 1).sum(axis=1) >= 4) |                 # casi consecutivos
-            (np.ptp(diffs, axis=1) == 0) |                    # progresion aritmetica
-            (s4 <= 34) | (s0 >= 35) |                         # todo bajo / todo alto
-            (par == 0) | (par == 5) |                         # todo par / todo impar
-            (s4 <= 31) |                                      # sesgo cumpleanos
-            (ssum < lo_band) | (ssum > hi_band) |             # suma fuera de banda
-            last_digit_same | (dec_max >= 4)                  # patron visual
-        )
-        good = ~bad
+        # ---- FILTROS (fuente unica canonica) ----
+        good = ~undesirable_mask_vec(C, (lo_band, hi_band))
         kept_total += int(good.sum())
         if not good.any():
             continue
 
+        ssum = C.sum(axis=1).astype(np.int32)
+        par = (C % 2 == 0).sum(axis=1)
+        low = (C <= 34).sum(axis=1)
         Cg = C[good]; idxg = idx[good]
         gg = ssum[good]; parg = par[good]; lowg = low[good]
 
@@ -448,11 +462,11 @@ def exhaustive_best(df: pd.DataFrame, a: dict, n_plays: int = 1,
             best_combos = best_combos[top]
             best_scores = best_scores[top]
 
-    # Powerball: se evalua el rango completo 1..26; se elige el mas "tipico"
-    # (mayor peso del ensemble de frecuencia+bayesiano). Es cosmetico: el PB
-    # es equiprobable, por eso las 292M cubren los 26 PB por igual.
+    # Powerball: el PB es EQUIPROBABLE (cosmetico). Se toman los PB de mayor
+    # frecuencia historica y se reparten entre jugadas para diversificar el eje
+    # PB en lugar de repetir uno solo. Las 292M cubren los 26 PB por igual.
     pb_freq = a["pb_freq"].values.astype(np.float64)
-    best_pb = int(np.argmax(pb_freq) + PB_MIN)
+    top_pbs = (np.argsort(pb_freq)[::-1] + PB_MIN).astype(int)
 
     order = np.argsort(best_scores)[::-1]
     scorer = Scorer(a)
@@ -460,7 +474,8 @@ def exhaustive_best(df: pd.DataFrame, a: dict, n_plays: int = 1,
     for k in order:
         combo = tuple(int(x) for x in best_combos[k])
         if all(len(set(combo) & set(c)) <= 2 for c, _, _ in chosen):
-            chosen.append((combo, best_pb, round(float(best_scores[k]), 2)))
+            pb = int(top_pbs[len(chosen) % len(top_pbs)])
+            chosen.append((combo, pb, round(float(best_scores[k]), 2)))
         if len(chosen) == n_plays:
             break
 
@@ -482,7 +497,7 @@ def exhaustive_best(df: pd.DataFrame, a: dict, n_plays: int = 1,
 # 7. GENERACION DE 20 JUGADAS SUGERIDAS
 # ---------------------------------------------------------------------------
 def generate_plays(df: pd.DataFrame, a: dict, n_sim: int = 1_000_000,
-                   n_plays: int = 20, seed: int = 20260705) -> pd.DataFrame:
+                   n_plays: int = 20, seed: int = 20260705) -> tuple[pd.DataFrame, dict]:
     rng = np.random.default_rng(seed)
 
     # Pesos del ENSEMBLE: promedio de los 4 modelos de blancas y de PB
@@ -545,7 +560,9 @@ def generate_plays(df: pd.DataFrame, a: dict, n_sim: int = 1_000_000,
 # ---------------------------------------------------------------------------
 # 8. PROGRAMA PRINCIPAL
 # ---------------------------------------------------------------------------
-def main(path_2016: str, path_2010: str, n_sim: int = 1_000_000, n_plays: int = 1):
+def main(path_2016: str, path_2010: str, n_plays: int = 1):
+    # Nota: el flujo principal usa el barrido EXHAUSTIVO (cobertura total), no
+    # el muestreo Monte Carlo. generate_plays() queda como API alternativa.
     print(__doc__)
     raw = load_raw(path_2016, path_2010)
     clean, rep = clean_and_validate(raw)

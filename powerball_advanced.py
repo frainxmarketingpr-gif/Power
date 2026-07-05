@@ -22,7 +22,8 @@ y anade:
       10% Monte Carlo (10M+)       10% Penalizacion por patrones populares
 
   * EVALUACION EXHAUSTIVA del espacio completo C(69,5)=11.238.513 combos
-    (x26 PB = 292.201.338 boletos) -> optimo GLOBAL garantizado.
+    (x26 PB = 292.201.338 boletos) -> optimo GLOBAL del subespacio recomendable
+    (tras descartar patrones populares con el filtro canonico).
 
   * OPTIMIZACION (validacion cruzada del optimo): Algoritmo Genetico,
     Simulated Annealing y frente de Pareto multiobjetivo. Confirman que
@@ -51,6 +52,28 @@ WCOLS = [f"n{i}" for i in range(1, 6)]
 # ===========================================================================
 # A. BATERIA DE PRUEBAS ESTADISTICAS
 # ===========================================================================
+def _lilliefors_normal(x: np.ndarray, n_sim: int = 1000, seed: int = 20260705):
+    """Test KS de normalidad con parametros estimados (Lilliefors). El p-valor
+    se calibra por Monte Carlo: se re-muestrean normales del mismo tamano,
+    se re-estiman media/sd y se compara el estadistico D. Sin dependencias
+    externas y estadisticamente valido para parametros estimados."""
+    x = np.asarray(x, dtype=float)
+    sd = x.std(ddof=0)
+    if sd == 0:
+        return float("nan"), float("nan")
+    z = (x - x.mean()) / sd
+    d0 = stats.kstest(z, "norm").statistic
+    rng = np.random.default_rng(seed)
+    n = len(x)
+    count = 0
+    for _ in range(n_sim):
+        s = rng.standard_normal(n)
+        s = (s - s.mean()) / s.std(ddof=0)
+        if stats.kstest(s, "norm").statistic >= d0:
+            count += 1
+    return float(d0), (count + 1) / (n_sim + 1)
+
+
 def statistical_tests(df: pd.DataFrame, a: dict) -> dict:
     n = a["n_draws"]
     out = {}
@@ -67,23 +90,28 @@ def statistical_tests(df: pd.DataFrame, a: dict) -> dict:
     chi_p, p_p = stats.chisquare(obs_p, exp_p)
     out["chi2_pb"] = (chi_p, p_p, len(obs_p) - 1)
 
-    # --- Kolmogorov-Smirnov: sumas vs. Normal ajustada ---
+    # --- Kolmogorov-Smirnov (Lilliefors): sumas vs. Normal con parametros
+    #     estimados de la propia muestra. El p-valor se calibra por Monte Carlo
+    #     (la distribucion nula de D con parametros estimados NO es la de KS
+    #     estandar; usarla directamente inflaria el p-valor).
     sums = a["sums"].astype(float)
-    ks_d, ks_p = stats.kstest((sums - sums.mean()) / sums.std(), "norm")
+    ks_d, ks_p = _lilliefors_normal(sums, n_sim=1000, seed=20260705)
     out["ks_sums"] = (ks_d, ks_p)
 
     # --- Runs Test (Wald-Wolfowitz) sobre la serie de sumas ---
+    #     Se DESCARTAN los empates con la mediana (requisito del test).
     med = np.median(sums)
-    signs = np.where(sums >= med, 1, 0)
-    signs = signs[np.r_[True, np.diff(np.r_[-1, signs]) != 0]] if False else signs
-    # numero de rachas
+    signs = (sums[sums != med] > med).astype(int)
     runs = 1 + int((np.diff(signs) != 0).sum())
     n1 = int((signs == 1).sum()); n2 = int((signs == 0).sum())
-    mu_r = 1 + 2 * n1 * n2 / (n1 + n2)
-    var_r = (2 * n1 * n2 * (2 * n1 * n2 - n1 - n2)) / ((n1 + n2) ** 2 * (n1 + n2 - 1))
-    z_runs = (runs - mu_r) / np.sqrt(var_r)
-    p_runs = 2 * (1 - stats.norm.cdf(abs(z_runs)))
-    out["runs_test"] = (runs, mu_r, z_runs, p_runs)
+    if n1 == 0 or n2 == 0:                       # serie degenerada
+        out["runs_test"] = (runs, float("nan"), float("nan"), float("nan"))
+    else:
+        mu_r = 1 + 2 * n1 * n2 / (n1 + n2)
+        var_r = (2 * n1 * n2 * (2 * n1 * n2 - n1 - n2)) / ((n1 + n2) ** 2 * (n1 + n2 - 1))
+        z_runs = (runs - mu_r) / np.sqrt(var_r)
+        p_runs = 2 * (1 - stats.norm.cdf(abs(z_runs)))
+        out["runs_test"] = (runs, mu_r, z_runs, p_runs)
 
     # --- Autocorrelacion de las sumas (lags 1..5) ---
     x = sums - sums.mean()
@@ -93,7 +121,8 @@ def statistical_tests(df: pd.DataFrame, a: dict) -> dict:
 
     # --- Entropia de Shannon de las frecuencias de blancas ---
     p = obs_w / obs_w.sum()
-    H = -np.sum(p * np.log2(p))
+    pnz = p[p > 0]                               # evita 0*log2(0)=NaN
+    H = -np.sum(pnz * np.log2(pnz))
     Hmax = np.log2(len(obs_w))
     out["entropy_white"] = (H, Hmax, H / Hmax)
 
@@ -128,7 +157,9 @@ class EnsembleModel:
     }
 
     def __init__(self, df: pd.DataFrame, a: dict, mc_iters: int = 10_000_000,
-                 boot_reps: int = 2000, recent_k: int = 10, seed: int = 20260705):
+                 boot_reps: int = 2000, recent_k: int = 10, seed: int = 20260705,
+                 half_life: int = 120, prior_strength: float = 69.0,
+                 sum_density: np.ndarray | None = None):
         self.a = a
         self.n = a["n_draws"]
         self.rng = np.random.default_rng(seed)
@@ -138,18 +169,20 @@ class EnsembleModel:
         wf = a["white_freq"].values.astype(float)
         self.freq_n = wf / wf.max()
 
-        # (2) Frecuencia reciente (decaimiento exponencial, half-life 120)
-        rw, _ = base.weights_recency(df, half_life=120)
+        # (2) Frecuencia reciente (decaimiento exponencial configurable)
+        rw, _ = base.weights_recency(df, half_life=half_life)
         self.recent_n = rw / rw.max()
 
-        # (3) Inferencia bayesiana (posterior Dirichlet, prior uniforme)
-        bw, _ = base.weights_bayesian(a, prior_strength=69.0)
+        # (3) Inferencia bayesiana (posterior Dirichlet, prior configurable)
+        bw, _ = base.weights_bayesian(a, prior_strength=prior_strength)
         self.bayes_n = bw / bw.max()
 
-        # (4) Monte Carlo (10M+): densidad empirica de la SUMA bajo el
-        #     modelo bayesiano; combos con suma "tipica" puntuan alto.
+        # (4) Monte Carlo (10M+): densidad empirica de la SUMA bajo el modelo
+        #     bayesiano. Se puede INYECTAR (p. ej. desde el motor Numba) para no
+        #     recalcularla; si no, se estima aqui con `mc_iters`.
         self.mc_iters = mc_iters
-        self.sum_density = self._monte_carlo_sum_density(bw, mc_iters)
+        self.sum_density = (sum_density if sum_density is not None
+                            else self._monte_carlo_sum_density(bw, mc_iters))
 
         # (5) Bootstrap: prob. por numero re-muestreando sorteos con reemplazo
         self.boot_n, self.boot_ci = self._bootstrap(df, boot_reps)
@@ -275,24 +308,9 @@ class EnsembleModel:
 # C. FILTRO DE PATRONES POPULARES / REDUNDANTES (vectorizado)
 # ===========================================================================
 def undesirable_mask(C: np.ndarray, sum_band: tuple[int, int]) -> np.ndarray:
-    diffs = np.diff(C, axis=1)
-    s0, s4 = C[:, 0], C[:, 4]
-    ssum = C.sum(axis=1)
-    par = (C % 2 == 0).sum(axis=1)
-    last_digit_same = (np.ptp(C % 10, axis=1) == 0)
-    dec = C // 10
-    dec_max = np.zeros(len(C), dtype=np.int8)
-    for d in range(0, 7):
-        dec_max = np.maximum(dec_max, (dec == d).sum(axis=1).astype(np.int8))
-    return (
-        ((diffs == 1).sum(axis=1) >= 4) |
-        (np.ptp(diffs, axis=1) == 0) |
-        (s4 <= 34) | (s0 >= 35) |
-        (par == 0) | (par == 5) |
-        (s4 <= 31) |
-        (ssum < sum_band[0]) | (ssum > sum_band[1]) |
-        last_digit_same | (dec_max >= 4)
-    )
+    """Delega en la mascara canonica de powerball_simulator (fuente unica del
+    filtro, ya con la correccion de '>=4 consecutivos' y cumpleanos)."""
+    return base.undesirable_mask_vec(C, sum_band)
 
 
 # ===========================================================================
@@ -321,6 +339,9 @@ def exhaustive_scs(model: EnsembleModel, a: dict, n_keep: int = 20000,
         if len(best_s) > n_keep:
             top = np.argpartition(best_s, -n_keep)[-n_keep:]
             best_C, best_s = best_C[top], best_s[top]
+    if len(best_s) == 0:
+        raise ValueError("Ninguna combinacion supero los filtros; revisa "
+                         "sum_band/datos de entrada.")
     order = np.argsort(best_s)[::-1]
     return best_C[order], best_s[order], dict(
         white_combos=total, tickets=total * (PB_MAX - PB_MIN + 1),
@@ -334,13 +355,18 @@ def _rand_combo(rng):
     return np.sort(rng.choice(np.arange(WHITE_MIN, WHITE_MAX + 1), N_WHITE, replace=False))
 
 
-def genetic_optimize(model, generations=120, pop=400, seed=7):
+def genetic_optimize(model, generations=120, pop=400, seed=7, score_fn=None):
     rng = np.random.default_rng(seed)
+    sf = score_fn or (lambda P: model.score_batch(P))
     P = np.array([_rand_combo(rng) for _ in range(pop)], dtype=np.int16)
+    best_c, best_f = None, -np.inf                  # elitismo: mejor global
     for _ in range(generations):
-        fit = model.score_batch(P)
+        fit = sf(P)
+        b = int(np.argmax(fit))
+        if fit[b] > best_f:
+            best_c, best_f = P[b].copy(), float(fit[b])
         elite = P[np.argsort(fit)[::-1][:pop // 5]]
-        children = []
+        children = [elite[0].copy()]                # el mejor pasa intacto
         while len(children) < pop:
             i, j = rng.integers(0, len(elite), 2)
             genes = np.unique(np.concatenate([elite[i], elite[j]]))
@@ -352,9 +378,11 @@ def genetic_optimize(model, generations=120, pop=400, seed=7):
             child = np.sort(rng.choice(genes, N_WHITE, replace=False))
             children.append(child)
         P = np.array(children, dtype=np.int16)
-    fit = model.score_batch(P)
-    b = np.argmax(fit)
-    return tuple(int(x) for x in P[b]), float(fit[b])
+    fit = sf(P)
+    b = int(np.argmax(fit))
+    if fit[b] > best_f:
+        best_c, best_f = P[b].copy(), float(fit[b])
+    return tuple(int(x) for x in best_c), best_f
 
 
 def simulated_annealing(model, iters=20000, T0=5.0, seed=11, score_fn=None):
@@ -396,7 +424,8 @@ def pareto_front(model, C: np.ndarray, top=2000):
     for i in range(n):
         if dominated[i]:
             continue
-        dom = np.all(obj >= obj[i], axis=1) & np.any(obj > obj[i], axis=1)
+        # marca como dominados los puntos que i DOMINA (i es >= en todo y > en algo)
+        dom = np.all(obj <= obj[i], axis=1) & np.any(obj < obj[i], axis=1)
         dominated[dom] = True
     front = np.where(~dominated)[0]
     scs = model.score_batch(C[front])
@@ -449,10 +478,20 @@ def run(path_2016, path_2010, mc_iters=10_000_000, n_plays=1):
     print(f"    {meta['kept']:,} pasan filtros ({100*meta['kept']/meta['white_combos']:.1f}%). "
           f"Banda suma P10-P90={meta['sum_band']}")
 
-    print("\n[D] Validacion cruzada (deben converger a SCS ~ maximo exhaustivo):")
-    ga_combo, ga_s = genetic_optimize(model)
-    sa_combo, sa_s = simulated_annealing(model)
-    print(f"    Exhaustivo (optimo global): {tuple(int(x) for x in C[0])}  SCS={S[0]:.2f}")
+    # GA/SA optimizan el MISMO objetivo restringido que el barrido (penalizan
+    # los patrones populares), para que la comparacion sea justa y converjan.
+    def constrained(P):
+        P = np.atleast_2d(np.asarray(P, dtype=np.int16))
+        P = np.sort(P, axis=1)
+        s = model.score_batch(P)
+        s = s - 100.0 * undesirable_mask(P, meta["sum_band"])
+        return s if len(s) > 1 else float(s[0])
+
+    print("\n[D] Validacion cruzada (mismo objetivo filtrado; deben converger):")
+    ga_combo, ga_s = genetic_optimize(model, score_fn=constrained)
+    sa_combo, sa_s = simulated_annealing(model, score_fn=constrained)
+    print(f"    Exhaustivo (optimo del subespacio recomendable): "
+          f"{tuple(int(x) for x in C[0])}  SCS={S[0]:.2f}")
     print(f"    Algoritmo Genetico        : {ga_combo}  SCS={ga_s:.2f}")
     print(f"    Simulated Annealing       : {sa_combo}  SCS={sa_s:.2f}")
     front, knee = pareto_front(model, C)
@@ -474,7 +513,6 @@ def run(path_2016, path_2010, mc_iters=10_000_000, n_plays=1):
     print("=" * 74)
     rows = []
     for i, (combo, sc) in enumerate(chosen, 1):
-        b = model.score_batch(np.array(combo, ndmin=2))  # componentes
         print(f"  #{i}  {' '.join(f'{x:02d}' for x in combo)}  + PB {model.best_pb}"
               f"   SCS = {sc:.2f}/100")
         rows.append(dict(jugada=i, blancas=" ".join(f"{x:02d}" for x in combo),

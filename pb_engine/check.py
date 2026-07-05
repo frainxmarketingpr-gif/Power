@@ -136,3 +136,36 @@ def compare_range(df: pd.DataFrame, whites, pb: int, start=None, end=None) -> di
         "nota": ("En la inmensa mayoria de sorteos una combinacion fija NO premia. "
                  "Esto ilustra la magnitud real de la probabilidad, no una estrategia."),
     }
+
+
+def _main():
+    """CLI: python -m pb_engine.check FECHA [b1 b2 b3 b4 b5 PB]
+
+    Sin boleto -> muestra los numeros ganadores de esa fecha.
+    Con 5 blancas + PB -> compara el boleto contra el sorteo real de esa fecha.
+    """
+    import sys
+    import json
+    from .config import Settings
+    from . import data_io
+
+    args = sys.argv[1:]
+    if not args:
+        print("Uso: python -m pb_engine.check FECHA [b1 b2 b3 b4 b5 PB]")
+        raise SystemExit(1)
+
+    s = Settings()
+    df, _ = data_io.load(s.path_2016, s.path_2010, s.rules)
+    fecha = args[0]
+
+    if len(args) >= 7:
+        whites = [int(x) for x in args[1:6]]
+        pb = int(args[6])
+        out = check_ticket(df, whites, pb, fecha)
+    else:
+        out = lookup_draw(df, fecha) or {"error": f"No hay sorteo en {fecha} (lun/mie/sab)."}
+    print(json.dumps(out, indent=2, ensure_ascii=False))
+
+
+if __name__ == "__main__":
+    _main()

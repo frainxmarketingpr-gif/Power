@@ -8,10 +8,14 @@ from rich.console import Console
 
 console = Console()
 
-# --- Logging con Loguru (formato limpio) ---
-logger.remove()
-logger.add(sys.stderr, level="INFO",
-           format="<green>{time:HH:mm:ss}</green> | <level>{level:<7}</level> | {message}")
+
+def setup_logging(level: str = "INFO") -> None:
+    """Configura Loguru con un formato limpio. Se invoca EXPLICITAMENTE desde
+    los entrypoints (cli/api/app); NO en el import, para no pisar el logging de
+    una aplicacion anfitriona que monte este paquete."""
+    logger.remove()
+    logger.add(sys.stderr, level=level,
+               format="<green>{time:HH:mm:ss}</green> | <level>{level:<7}</level> | {message}")
 
 
 class Rules(BaseModel):
