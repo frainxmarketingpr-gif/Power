@@ -34,6 +34,11 @@ with st.sidebar:
                         help="Elige al azar entre las mejores combinaciones "
                              "(todas de score casi identico y misma probabilidad "
                              "real). Desactivalo para el maximo global fijo.")
+    coverage = st.toggle("Modo grupo (maxima cobertura)", value=False,
+                         help="Para una bolsa/grupo: genera N jugadas que ENTRE "
+                              "TODAS cubren la mayor variedad de numeros, con "
+                              "minima repeticion. Reparte el riesgo (no cambia la "
+                              "probabilidad de ganar).")
     run_btn = st.button("Ejecutar simulacion", type="primary")
 
 
@@ -41,8 +46,8 @@ if run_btn:
     import os
     # Semilla de eleccion nueva por corrida -> jugadas distintas en modo variedad
     pick_seed = int.from_bytes(os.urandom(4), "little") if variety else None
-    res = pipeline.run(Settings(n_plays=n_plays, mc_iters=mc,
-                                variety=variety, pick_seed=pick_seed))
+    res = pipeline.run(Settings(n_plays=n_plays, mc_iters=mc, variety=variety,
+                                pick_seed=pick_seed, coverage=coverage))
     c1, c2 = st.columns(2)
     with c1:
         st.subheader("Validacion de datos")

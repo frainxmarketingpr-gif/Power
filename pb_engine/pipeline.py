@@ -132,15 +132,58 @@ def run(settings: Settings | None = None) -> Result:
                 break
         return out
 
-    chosen = _select(2)
+    def _select_coverage():
+        """Seleccion greedy de MAXIMA COBERTURA: cada jugada suma los numeros
+        menos usados, con un TOPE duro de repeticiones por numero para forzar el
+        reparto (todas siguen siendo no-populares y de score alto)."""
+        from collections import Counter
+        used = Counter()
+        picked, out = set(), []
+        P = min(s.coverage_pool, len(C))
+        # tope inicial ~ 3 para 14 jugadas; se relaja solo si el pool no alcanza
+        cap = max(2, (s.n_plays * r.n_white) // (r.white_max - r.white_min + 1) + 2)
+        for _ in range(s.n_plays):
+            best_key, best_i = None, None
+            while best_i is None:
+                for i in range(P):
+                    if i in picked:
+                        continue
+                    if any(used[int(x)] >= cap for x in C[i]):
+                        continue          # respeta el tope de repeticiones
+                    gain = sum(1.0 / (1.0 + used[int(x)]) for x in C[i])
+                    key = (gain, -i)      # empate -> mayor score (indice menor)
+                    if best_key is None or key > best_key:
+                        best_key, best_i = key, i
+                if best_i is None:
+                    cap += 1              # nadie cumple el tope -> relajar
+                    if cap > s.n_plays:
+                        break
+            if best_i is None:
+                break
+            picked.add(best_i)
+            for x in C[best_i]:
+                used[int(x)] += 1
+            out.append((tuple(int(x) for x in C[best_i]), float(S[best_i])))
+        return out
+
+    if s.coverage:
+        chosen = _select_coverage()
+    else:
+        chosen = _select(2)
+        if len(chosen) < s.n_plays:
+            chosen = _select(3)
     if len(chosen) < s.n_plays:
-        chosen = _select(3)
-    if len(chosen) < s.n_plays:
-        logger.warning(f"Solo {len(chosen)} jugadas diversas de {s.n_plays} pedidas.")
-    # Powerball (equiprobable): en modo variedad se elige al azar entre los mas
-    # frecuentes; en modo determinista se reparten los top por jugada.
+        logger.warning(f"Solo {len(chosen)} jugadas de {s.n_plays} pedidas.")
+
+    # Powerball (equiprobable). Cobertura: PBs DISTINTOS repartidos en 1-26.
+    # Variedad: al azar entre los mas frecuentes. Determinista: top por jugada.
     top_pbs = (np.argsort(a["pb_freq"].values)[::-1] + r.pb_min).astype(int)
-    if s.variety:
+    if s.coverage:
+        spread = np.unique(np.linspace(r.pb_min, r.pb_max, len(chosen)).round().astype(int))
+        while len(spread) < len(chosen):     # completar si hubo colisiones
+            spread = np.union1d(spread, [x for x in top_pbs if x not in spread][:1])
+        pbs = [int(x) for x in spread[:len(chosen)]]
+    elif s.variety:
         pbs = [int(x) for x in pick_rng.choice(top_pbs[:10], size=len(chosen))]
     else:
         pbs = [int(top_pbs[(i) % len(top_pbs)]) for i in range(len(chosen))]

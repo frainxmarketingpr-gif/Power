@@ -78,6 +78,10 @@ class Settings(BaseModel):
     variety: bool = False
     top_pool: int = 500            # tamano del pool de mejores para la variedad
     pick_seed: int | None = None   # semilla de la eleccion (None -> usa `seed`)
+    # Modo grupo/cobertura: elige N jugadas que ENTRE TODAS cubran la mayor
+    # variedad de numeros (minima repeticion) -> ideal para una bolsa/syndicate.
+    coverage: bool = False
+    coverage_pool: int = 20000     # pool de mejores (por score) sobre el que cubrir
     weights: ScoreWeights = Field(default_factory=ScoreWeights)
     rules: Rules = Field(default_factory=Rules)
 
